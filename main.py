@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from services.ai import generate_advice
 import os, requests
 
 # ---- Config ----
@@ -89,3 +91,26 @@ def risk(address: str = Query(..., min_length=3)):
         raise HTTPException(502, f"Upstream API failed: {e}")
     except Exception as e:
         raise HTTPException(500, f"Server error: {e}")
+
+class AdvisorRequest(BaseModel):
+    address: str
+    elevation_m: float
+    avg_monthly_rain_mm: float
+    risk_level: str
+    specs: str | None = None  # user-provided extra details via chat
+
+@app.post("/advisor")
+def advisor(body: AdvisorRequest):
+    try:
+        advice = generate_advice(
+            address=body.address,
+            elevation_m=body.elevation_m,
+            avg_rain_mm=body.avg_monthly_rain_mm,
+            risk_level=body.risk_level,
+            specs=body.specs or "",
+        )
+        return {"advice": advice}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM error: {e}")
