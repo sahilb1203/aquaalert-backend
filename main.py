@@ -92,6 +92,37 @@ def risk(address: str = Query(..., min_length=3)):
     except Exception as e:
         raise HTTPException(500, f"Server error: {e}")
 
+def bump_risk(level: str) -> str:
+    order = ["Low", "Moderate", "High"]
+    i = order.index(level) if level in order else 0
+    return order[min(i + 1, len(order)-1)]
+
+def floodish(event: str) -> bool:
+    return any(k in (event or "").lower() for k in ["flood", "flash", "coastal", "surge"])
+
+# --- Live alerts bump (point-based) ---
+try:
+    headers = {"User-Agent": "AquaAlert/1.0 (contact: you@example.com)", "Accept": "application/geo+json"}
+    r = requests.get(
+        "https://api.weather.gov/alerts/active",
+        params={"status": "actual", "point": f"{lat},{lon}"},
+        headers=headers,
+        timeout=8
+    )
+    if r.ok:
+        feats = r.json().get("features", [])
+        flood_feats = [f for f in feats if floodish(f.get("properties", {}).get("event", ""))]
+        if flood_feats:
+            # If any flood alert at the point, bump one level; if any 'Severe/Extreme', force High
+            severities = [ (f.get("properties", {}) or {}).get("severity", "") for f in flood_feats ]
+            if any(s and s.lower() in ("severe", "extreme") for s in severities):
+                risk_level = "High"
+            else:
+                risk_level = bump_risk(risk_level)
+except Exception:
+    pass
+
+
 class AdvisorRequest(BaseModel):
     address: str
     elevation_m: float
@@ -114,3 +145,4 @@ def advisor(body: AdvisorRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {e}")
+    
